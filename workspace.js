@@ -12,6 +12,9 @@ const invite=new URL(location.href);invite.hash='room='+room;
 history.replaceState(null,'',invite);
 const sessionKey='replydesk.profile.'+room;
 let account={};try{account=JSON.parse(localStorage.getItem(sessionKey)||'{}')}catch{}
+const savedProfileKey=name=>sessionKey+'.trusted.'+name;
+if(['Alex','Okan'].includes(account.name)&&valid(account.key))localStorage.setItem(savedProfileKey(account.name),account.key);
+function remembered(name){const key=localStorage.getItem(savedProfileKey(name));return valid(key)?key:null}
 let author=valid(account.key)?account.name:'',items=[],sources=[],filter='all',source=0,active='',revision=0,loadVersion=0,messageStamp='',pending=null,busy=false;
 const drafts=new Map(),urls=new Set(),ids=new WeakMap();
 function node(tag,text,cls){const e=document.createElement(tag);e.textContent=text||'';if(cls)e.className=cls;return e}
@@ -19,28 +22,34 @@ function identity(){ $('initial').textContent=author?author[0].toUpperCase():'�
 let registered=[],profileLoaded=false;
 function profileHint(){
  const name=$('name').value,exists=registered.includes(name),password=$('personalPassword');
+ const trusted=Boolean(remembered(name));
+ password.closest('label').hidden=!profileLoaded||!name||trusted;
+ password.disabled=trusted||!name;password.required=Boolean(name)&&!trusted;
  password.minLength=exists?1:12;password.autocomplete=exists?'current-password':'new-password';
- $('profileHelp').textContent=!profileLoaded?'Проверяване на профилите…':!name?'Избери личния си профил.':exists?'Въведи личната си парола.':'Първо активиране. Създай своя парола от поне 12 знака.';
+ $('profileHelp').textContent=!profileLoaded?'Проверяване на профилите…':!name?'Избери личния си профил.':trusted?'Профилът е запомнен в този браузър.':exists?'Отключи профила еднократно за този браузър.':'Първо активиране. Създай своя парола от поне 12 знака.';
  $('unlock').disabled=!profileLoaded||!name;
- $('unlock').textContent=exists?'Отключи':'Активирай профила';
+ $('unlock').textContent=trusted?'Избери профила':exists?'Отключи':'Активирай профила';
 }
 async function openProfile(fn){
  pending=fn;profileLoaded=false;$('name').value=author||'';$('personalPassword').value='';$('profileError').textContent='';profileHint();$('identity').showModal();
  try{registered=await api('?profiles=1');profileLoaded=true;profileHint()}catch(e){$('profileError').textContent=e.message}
 }
 function named(fn){if(author&&valid(account.key))return fn();openProfile(fn)}
-$('rename').onclick=()=>openProfile(null);$('name').onchange=profileHint;
+$('rename').onclick=()=>openProfile(null);$('name').onchange=()=>{profileHint();if(profileLoaded&&remembered($('name').value))$('nameForm').requestSubmit()};
 $('nameForm').onsubmit=async e=>{
  e.preventDefault();const name=$('name').value,password=$('personalPassword').value;
  if(!profileLoaded||!['Alex','Okan'].includes(name))return;
  $('unlock').disabled=true;
  try{
+  let key=remembered(name);
+  if(!key){
   const enc=new TextEncoder();
   const material=await crypto.subtle.importKey('raw',enc.encode(password),'PBKDF2',false,['deriveBits']);
   const bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:enc.encode('Replydesk:'+room+':'+name),iterations:310000},material,256);
-  const key=Array.from(new Uint8Array(bits),n=>n.toString(16).padStart(2,'0')).join('');
+  key=Array.from(new Uint8Array(bits),n=>n.toString(16).padStart(2,'0')).join('');
+  }
   const data=new FormData();data.set('op','profile');data.set('name',name);data.set('profileKey',key);data.set('setup',registered.includes(name)?'0':'1');
-  await api('',data);account={name,key};author=name;localStorage.setItem(sessionKey,JSON.stringify(account));identity();messageStamp='';$('personalPassword').value='';$('identity').close();
+  await api('',data);localStorage.setItem(savedProfileKey(name),key);account={name,key};author=name;localStorage.setItem(sessionKey,JSON.stringify(account));identity();messageStamp='';$('personalPassword').value='';$('identity').close();
   const fn=pending;pending=null;await refresh();fn?.();
  }catch(err){$('profileError').textContent=err.message;registered=await api('?profiles=1').catch(()=>registered)}
  finally{profileHint()}
