@@ -43,6 +43,7 @@ function paint(){
  $('list').replaceChildren(...shown.map(t=>{const b=node('button','','item');b.classList.toggle('active',t.id===active);b.append(mailLabels(t),node('b',t.title),node('small',t.lead+' · '+date(t.updated)));b.onclick=()=>select(t.id).catch(report);return b}));
  if(!shown.length)$('list').append(node('p',items.length?'Няма имейли за този избор.':'Още няма имейли. Добави първия от „Нов имейл“.','listEmpty'));
  const t=items.find(t=>t.id===active);$('thread').hidden=!t;$('empty').hidden=!!t;
+ $('edit').hidden=!t||Boolean(t.done);
  if(t){$('subject').textContent=t.title;$('tag').replaceChildren(mailLabels(t));$('lead').textContent=t.lead+(t.rownum?' · ред '+t.rownum:'');$('done').textContent=t.done?'Върни за обсъждане':'✓ Готово'}
 }
 function report(e){$('status').textContent=e.message||'Връзката прекъсна. Натисни „Обнови“.'}
@@ -91,6 +92,32 @@ for(const form of [$('create'),$('reply')]){
   catch(err){error.textContent=err.message;report(err)}finally{busy=false;button.disabled=false}
  })};
 }
+let editing;
+$('edit').onclick=()=>{
+ const thread=items.find(item=>item.id===active);
+ if(!thread||thread.done)return;
+ editing={...thread};
+ const form=$('editForm');
+ for(const key of ['title','lead','source','rownum'])form.elements[key].value=thread[key]??'';
+ form.querySelector('.error').textContent='';
+ $('editor').showModal();form.elements.title.focus();
+};
+$('editForm').onsubmit=async event=>{
+ event.preventDefault();
+ const form=event.currentTarget,button=form.querySelector('button.primary');
+ if(button.disabled||!editing)return;
+ const original=editing, data=new FormData(form);
+ data.set('op','edit');data.set('id',original.id);
+ data.set('oldTitle',original.title);data.set('oldLead',original.lead);
+ data.set('oldSource',original.source);data.set('oldRow',original.rownum||0);
+ button.disabled=true;form.querySelector('.error').textContent='';
+ try{
+  await api('',data);$('editor').close();
+  if(source===original.source)source=Number(data.get('source'));
+  await refresh();
+ }catch(err){form.querySelector('.error').textContent=err.message;report(err);await refresh().catch(report)}
+ finally{button.disabled=false}
+};
 $('done').onclick=async()=>{const t=items.find(i=>i.id===active);if(!t||busy)return;const f=new FormData();f.set('op','status');f.set('id',t.id);f.set('done',t.done?'0':'1');busy=true;$('done').disabled=true;
  try{await api('',f);filter=t.done?'open':'done';source=0;await refresh()}catch(e){report(e)}finally{busy=false;$('done').disabled=false}};
 identity();$('list').textContent='Зареждане…';refresh().catch(report);api('?sources=1').then(v=>{sources=v;paint()}).catch(report);
