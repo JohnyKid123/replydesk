@@ -10,18 +10,48 @@ const room=valid(incoming)?incoming:valid(saved)?saved:Array.from(crypto.getRand
 localStorage.setItem('replydesk.room',room);
 const invite=new URL(location.href);invite.hash='room='+room;
 history.replaceState(null,'',invite);
-let author=(['Okan','Alex'].find(n=>n.toLowerCase()===(localStorage.getItem('replydesk.author')||'').toLowerCase())||''),items=[],sources=[],filter='all',source=0,active='',revision=0,loadVersion=0,messageStamp='',pending=null,busy=false;
+const sessionKey='replydesk.profile.'+room;
+let account={};try{account=JSON.parse(localStorage.getItem(sessionKey)||'{}')}catch{}
+let author=valid(account.key)?account.name:'',items=[],sources=[],filter='all',source=0,active='',revision=0,loadVersion=0,messageStamp='',pending=null,busy=false;
 const drafts=new Map(),urls=new Set(),ids=new WeakMap();
 function node(tag,text,cls){const e=document.createElement(tag);e.textContent=text||'';if(cls)e.className=cls;return e}
 function identity(){ $('initial').textContent=author?author[0].toUpperCase():'•';$('rename').textContent=author||'Твоето име';}
-function named(fn){if(author)return fn();pending=fn;$('identity').showModal();$('name').focus();}
-$('rename').onclick=()=>{$('name').value=author;pending=null;$('identity').showModal()};
-$('nameForm').onsubmit=e=>{e.preventDefault();const v=$('name').value.trim();if(!['Okan','Alex'].includes(v))return;author=v;localStorage.setItem('replydesk.author',v);identity();$('identity').close();const fn=pending;pending=null;fn?.()};
+let registered=[],profileLoaded=false;
+function profileHint(){
+ const name=$('name').value,exists=registered.includes(name),password=$('personalPassword');
+ password.minLength=exists?1:12;password.autocomplete=exists?'current-password':'new-password';
+ $('profileHelp').textContent=!profileLoaded?'Проверяване на профилите…':!name?'Избери личния си профил.':exists?'Въведи личната си парола.':'Първо активиране. Създай своя парола от поне 12 знака.';
+ $('unlock').disabled=!profileLoaded||!name;
+ $('unlock').textContent=exists?'Отключи':'Активирай профила';
+}
+async function openProfile(fn){
+ pending=fn;profileLoaded=false;$('name').value=author||'';$('personalPassword').value='';$('profileError').textContent='';profileHint();$('identity').showModal();
+ try{registered=await api('?profiles=1');profileLoaded=true;profileHint()}catch(e){$('profileError').textContent=e.message}
+}
+function named(fn){if(author&&valid(account.key))return fn();openProfile(fn)}
+$('rename').onclick=()=>openProfile(null);$('name').onchange=profileHint;
+$('nameForm').onsubmit=async e=>{
+ e.preventDefault();const name=$('name').value,password=$('personalPassword').value;
+ if(!profileLoaded||!['Alex','Okan'].includes(name))return;
+ $('unlock').disabled=true;
+ try{
+  const enc=new TextEncoder();
+  const material=await crypto.subtle.importKey('raw',enc.encode(password),'PBKDF2',false,['deriveBits']);
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:enc.encode('Replydesk:'+room+':'+name),iterations:310000},material,256);
+  const key=Array.from(new Uint8Array(bits),n=>n.toString(16).padStart(2,'0')).join('');
+  const data=new FormData();data.set('op','profile');data.set('name',name);data.set('profileKey',key);data.set('setup',registered.includes(name)?'0':'1');
+  await api('',data);account={name,key};author=name;localStorage.setItem(sessionKey,JSON.stringify(account));identity();messageStamp='';$('personalPassword').value='';$('identity').close();
+  const fn=pending;pending=null;await refresh();fn?.();
+ }catch(err){$('profileError').textContent=err.message;registered=await api('?profiles=1').catch(()=>registered)}
+ finally{profileHint()}
+};
 $('share').onclick=()=>{$('invite').value=invite.href;$('copied').textContent='';$('sharing').showModal()};
 $('copy').onclick=async()=>{try{await navigator.clipboard.writeText(invite.href);$('copied').textContent='Линкът е копиран.'}catch{$('invite').select();$('copied').textContent='Копирай избрания линк.'}};
 for(const b of document.querySelectorAll('[data-close]'))b.onclick=()=>b.closest('dialog').close();
 async function api(query='',form=null,binary=false){
+ if(form&&!form.has('profileKey')&&account.key)form.set('profileKey',account.key);
  const r=await fetch(host+query,{method:form?'POST':'GET',headers:{'x-room':room},body:form,cache:'no-store',credentials:'omit'});
+ if(r.status===401){author='';account={};localStorage.removeItem(sessionKey);identity()}
  if(!r.ok){const data=await r.json().catch(()=>({}));throw Error(data.error||'Грешка при връзката ('+r.status+'). Опитай отново.')}
  return binary?r.blob():r.json();
 }
@@ -54,25 +84,77 @@ async function select(id){
  if(active!==id){active=id;revision++;messageStamp='';$('history').replaceChildren();clearUrls();$('reply').reset();const d=drafts.get(id);if(d){$('comment').value=d.body;$('reply').elements.files.files=d.files}fileLabels($('reply'))}
  paint();if(id)await messages();
 }
+const audioFormats={wav:'audio/wav',webm:'audio/webm',ogg:'audio/ogg',mp4:'audio/mp4',m4a:'audio/mp4',mp3:'audio/mpeg'};
+function audioAttachment(file,mime){
+ const box=node('div','','voice-message'),label=node('small','Гласово съобщение'),player=node('audio'),retry=node('button','Зареди записа','light');
+ box.append(label,player,retry);player.controls=true;player.preload='metadata';player.hidden=true;
+ async function loadAudio(){
+  retry.disabled=true;retry.textContent='Зареждане…';
+  try{
+   const data=await api('?file='+encodeURIComponent(file.key),null,true);if(!box.isConnected)return;
+   const url=URL.createObjectURL(new Blob([data],{type:mime}));urls.add(url);player.src=url;player.hidden=false;retry.hidden=true;
+   const link=node('a','Изтегли записа');link.href=url;link.download=file.name;box.append(link);
+   player.onerror=()=>{label.textContent='Този формат не се възпроизвежда в браузъра. Можеш да изтеглиш записа.'};
+  }catch{retry.textContent='Опитай отново'}finally{retry.disabled=false}
+ }
+ retry.onclick=loadAudio;
+ if('IntersectionObserver' in window){
+  const observer=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting)){observer.disconnect();loadAudio()}});
+  observer.observe(box);
+ }
+ return box;
+}
 function entry(m){
- const e=node('div','','entry');e.dataset.id=m.id;e.classList.toggle('own',m.author===author);e.append(node('b',m.author),node('time',date(m.created)));if(m.body)e.append(node('p',m.body));
+ const e=node('div','','entry');e.dataset.id=m.id;e.classList.toggle('own',!!author&&m.author.trim().toLowerCase()===author.toLowerCase());e.append(node('b',m.author),node('time',date(m.created)));if(m.body)e.append(node('p',m.body));
+ if(e.classList.contains('own')){
+  const menu=node('details','','message-menu'),toggle=node('summary','•••');toggle.setAttribute('aria-label','Опции за съобщението');
+  const actions=node('div','','message-actions');for(const [op,label] of [['editMessage','Редактирай'],['removeMessage','Изтрий']]){
+   const b=node('button',label);b.onclick=()=>{menu.open=false;showMessageForm(m,op)};actions.append(b);
+  }
+  menu.append(toggle,actions);e.prepend(menu);
+ }
  for(const f of JSON.parse(m.files)){
+  const audioMime=audioFormats[f.name.split('.').pop().toLowerCase()];
+  if(audioMime){e.append(audioAttachment(f,audioMime));continue}
   const b=node('button',f.name.startsWith('voice-')?'▶ Гласово съобщение':'📎 '+f.name,'light');e.append(b);
   b.onclick=async()=>{b.disabled=true;const rev=revision;
    try{const blob=await api('?file='+encodeURIComponent(f.key),null,true);if(rev!==revision)return;
     const ext=f.name.split('.').pop().toLowerCase(),mime=({png:'image/png',jpeg:'image/jpeg',jpg:'image/jpeg',webp:'image/webp',gif:'image/gif'})[ext];
-    const audioType=({webm:'audio/webm',ogg:'audio/ogg',mp4:'audio/mp4',m4a:'audio/mp4',mp3:'audio/mpeg',wav:'audio/wav'})[ext];
-    const url=URL.createObjectURL(new Blob([blob],{type:mime||audioType||'application/octet-stream'}));urls.add(url);
+    const url=URL.createObjectURL(new Blob([blob],{type:mime||'application/octet-stream'}));urls.add(url);
     if(mime){const zoom=node('button','','image-preview');zoom.title='Увеличи снимката';const img=node('img');img.alt=f.name;img.src=url;zoom.append(img);zoom.onclick=()=>showPhoto(url,f.name);e.append(zoom);showPhoto(url,f.name)}
-    if(audioType){const player=node('audio');player.controls=true;player.src=url;e.append(player);player.play().catch(()=>{})}
-    const a=node('a','Изтегли '+f.name);a.href=url;a.download=f.name;e.append(a);b.remove();if(!mime&&!audioType)a.click();
+    const a=node('a','Изтегли '+f.name);a.href=url;a.download=f.name;e.append(a);b.remove();if(!mime)a.click();
    }catch(err){report(err)}finally{b.disabled=false}
   };
  }
  return e;
 }
 let mVersion=0;
-async function messages(){const ver=++mVersion,id=active;if(!id)return;const all=await api('?id='+id);if(active!==id||ver!==mVersion)return;const stamp=all.map(m=>m.id).join(',');if(stamp===messageStamp)return;messageStamp=stamp;const rendered=new Set([...$('history').children].map(e=>e.dataset.id));for(const m of all)if(!rendered.has(m.id))$('history').append(entry(m))}
+async function messages(){
+ const ver=++mVersion,id=active;if(!id)return;const all=await api('?id='+id);if(active!==id||ver!==mVersion)return;
+ const stamp=JSON.stringify([author,all.map(m=>[m.id,m.body])]);if(stamp===messageStamp)return;messageStamp=stamp;
+ const rendered=new Map([...$('history').children].map(el=>[el.dataset.id,el]));
+ for(const m of all){
+  const old=rendered.get(m.id),signature=JSON.stringify([author,m.body]);rendered.delete(m.id);
+  if(old?.dataset.signature===signature)continue;
+  const el=entry(m);el.dataset.signature=signature;if(old)old.replaceWith(el);else $('history').append(el);
+ }
+ for(const el of rendered.values())el.remove();
+}
+let editingMessage=null;
+function showMessageForm(m,op){
+ editingMessage={m,op,thread:active};const del=op==='removeMessage';
+ $('msgHeading').textContent=del?'Изтриване на съобщение':'Редактиране на съобщение';$('msgLabel').hidden=del;
+ $('msgText').value=m.body;$('msgSave').textContent=del?'Изтрий за двама ни':'Запази';
+ $('msgNote').textContent=del?'Съобщението и файловете му ще бъдат изтрити и за двама ви.':'';
+ $('msgError').textContent='';$('messageDialog').showModal();
+}
+$('messageForm').onsubmit=async e=>{
+ e.preventDefault();if(!editingMessage)return;
+ const {m,op,thread}=editingMessage, data=new FormData();data.set('id',thread);data.set('mid',m.id);data.set('op',op);
+ data.set('body',$('msgText').value.trim());data.set('original',m.body);
+ $('msgSave').disabled=true;
+ try{await api('',data);$('messageDialog').close();await refresh()}catch(err){$('msgError').textContent=err.message}finally{$('msgSave').disabled=false}
+};
 async function refresh(){const ver=++loadVersion;const all=await api();if(ver!==loadVersion)return;items=all;if(active&&!all.some(t=>t.id===active))await select('');paint();if(active)await messages();$('status').textContent=''}
 function move(f,s){filter=f;source=s;select('').catch(report)}
 for(const b of document.querySelectorAll('[data-filter]'))b.onclick=()=>move(b.dataset.filter,0);
@@ -87,7 +169,7 @@ for(const form of [$('create'),$('reply')]){
   if(!String(fd.get('body')||'').trim()&&!form.elements.files.files.length){error.textContent='Добави текст или прикачи файл.';return}
   const files=Array.from(form.elements.files.files);if(files.length>8||files.reduce((a,b)=>a+b.size,0)>20*1024*1024){error.textContent='До 8 файла и до 20 MB общо.';return}
   const prev=ids.get(form);const target=isNew?'new':active;const stamp=JSON.stringify([...fd].map(([k,v])=>[k,typeof v==='string'?v:[v.name,v.size,v.lastModified]]));
-  const tx=prev&&prev.target===target&&prev.stamp===stamp?prev:{target,stamp,id:isNew?crypto.randomUUID():active,mid:crypto.randomUUID()};ids.set(form,tx);
+  const tx=prev&&prev.author===author&&prev.target===target&&prev.stamp===stamp?prev:{target,stamp,author,id:isNew?crypto.randomUUID():active,mid:crypto.randomUUID()};ids.set(form,tx);
   fd.set('author',author);fd.set('op',isNew?'new':'message');fd.set('id',tx.id);fd.set('mid',tx.mid);
   const button=form.querySelector('button.primary');busy=true;button.disabled=true;
   try{await api('',fd);ids.delete(form);if(isNew)$('composer').close();if(isNew||active===tx.id){form.reset();fileLabels(form)}drafts.delete(tx.id);if(isNew){source=0;filter='open';$('search').value=''}await refresh();if(isNew)await select(tx.id)}
@@ -120,16 +202,16 @@ $('editForm').onsubmit=async event=>{
  }catch(err){form.querySelector('.error').textContent=err.message;report(err);await refresh().catch(report)}
  finally{button.disabled=false}
 };
-$('done').onclick=async()=>{const t=items.find(i=>i.id===active);if(!t||busy)return;const f=new FormData();f.set('op','status');f.set('id',t.id);f.set('done',t.done?'0':'1');busy=true;$('done').disabled=true;
- try{await api('',f);filter=t.done?'open':'done';source=0;await refresh()}catch(e){report(e)}finally{busy=false;$('done').disabled=false}};
+$('done').onclick=()=>named(async()=>{const t=items.find(i=>i.id===active);if(!t||busy)return;const f=new FormData();f.set('op','status');f.set('id',t.id);f.set('done',t.done?'0':'1');busy=true;$('done').disabled=true;
+ try{await api('',f);filter=t.done?'open':'done';source=0;await refresh()}catch(e){report(e)}finally{busy=false;$('done').disabled=false}});
 identity();$('list').textContent='Зареждане…';refresh().catch(report);api('?sources=1').then(v=>{sources=v;paint()}).catch(report);
 setInterval(()=>{if(!document.hidden&&!busy&&!document.querySelector('dialog[open]'))refresh().catch(report)},12000);
 
 let deleteTarget='';
-$('deleteMail').onclick=()=>{
+$('deleteMail').onclick=()=>named(()=>{
  const t=items.find(i=>i.id===active);if(!t)return;
  deleteTarget=t.id;$('deleteTitle').textContent=t.title;$('deleteError').textContent='';$('deleting').showModal();
-};
+});
 $('confirmDelete').onclick=async()=>{
  const button=$('confirmDelete');button.disabled=true;
  const data=new FormData();data.set('op','delete');data.set('id',deleteTarget);
@@ -150,47 +232,71 @@ $('larger').onclick=()=>zoomPhoto(scale+.5);$('smaller').onclick=()=>zoomPhoto(s
 $('fit').onclick=()=>zoomPhoto(1);$('photo').ondblclick=()=>zoomPhoto(scale===1?2:1);
 
 let take=null;
-function stopMic(t){clearInterval(t.timer);t.stream?.getTracks().forEach(track=>track.stop())}
+function stopMic(t){
+ clearInterval(t.timer);
+ if(t.processor)t.processor.onaudioprocess=null;
+ for(const n of [t.source,t.processor,t.mute])n?.disconnect();
+ t.stream?.getTracks().forEach(track=>track.stop());
+ if(t.ctx&&t.ctx.state!=='closed')t.ctx.close().catch(()=>{});
+ t.recording=false;
+}
 function releaseTake(){
- const t=take;take=null;if(!t)return;
- if(t.recorder?.state==='recording')t.recorder.stop();
- stopMic(t);if(t.url)URL.revokeObjectURL(t.url);$('listen').pause();$('listen').removeAttribute('src');$('listen').load();
+ const t=take;take=null;if(!t)return;stopMic(t);
+ if(t.url)URL.revokeObjectURL(t.url);$('listen').pause();$('listen').removeAttribute('src');$('listen').load();
 }
 $('voicing').addEventListener('close',releaseTake);
 $('voice').onclick=()=>named(()=>{
  if(!active)return;releaseTake();take={thread:active,author,mid:crypto.randomUUID()};
  $('listen').hidden=true;$('record').disabled=false;$('record').textContent='Започни запис';$('sendVoice').disabled=true;
- $('voiceState').textContent='Можеш да чуеш записа преди изпращане.';$('voicing').showModal();
+ $('voiceState').textContent='Натисни „Започни запис“ и разреши микрофона.';$('voicing').showModal();
 });
+function wave(parts,rate){
+ const count=parts.reduce((n,p)=>n+p.length,0),buffer=new ArrayBuffer(44+count*2),v=new DataView(buffer);
+ const label=(pos,text)=>{for(let i=0;i<text.length;i++)v.setUint8(pos+i,text.charCodeAt(i))};
+ label(0,'RIFF');v.setUint32(4,36+count*2,true);label(8,'WAVE');label(12,'fmt ');v.setUint32(16,16,true);
+ v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);
+ v.setUint16(32,2,true);v.setUint16(34,16,true);label(36,'data');v.setUint32(40,count*2,true);
+ let at=44;for(const part of parts)for(const sample of part){v.setInt16(at,sample,true);at+=2}
+ return new Blob([new Uint8Array(buffer)],{type:'audio/wav'});
+}
+function finishRecording(t){
+ if(t!==take||!t.recording)return;const rate=t.ctx.sampleRate;stopMic(t);
+ $('record').textContent='Запиши отново';$('record').disabled=false;
+ if(!t.samples||!t.heard){$('voiceState').textContent='Не се чу звук. Провери избрания микрофон и запиши отново.';return}
+ t.blob=wave(t.parts,rate);t.parts=[];t.url=URL.createObjectURL(t.blob);$('listen').src=t.url;$('listen').hidden=false;
+ $('voiceState').textContent='Записът е готов за прослушване.';$('sendVoice').disabled=false;
+}
 $('record').onclick=async()=>{
- const t=take;if(!t)return;
- if(t.recorder?.state==='recording'){t.recorder.stop();return}
- const button=$('record');button.disabled=true;
+ const t=take;if(!t)return;if(t.recording){finishRecording(t);return}
+ const button=$('record');button.disabled=true;$('sendVoice').disabled=true;
  try{
-  if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)throw Error('Браузърът не поддържа запис. Можеш да прикачиш аудиофайл.');
+  const Audio=window.AudioContext||window.webkitAudioContext;
+  if(!Audio||!navigator.mediaDevices?.getUserMedia)throw Error('Този браузър не предоставя микрофон. Отвори сайта в Safari, Chrome или Opera.');
+  $('listen').pause();$('listen').hidden=true;if(t.url){URL.revokeObjectURL(t.url);t.url=''}t.blob=null;
+  const ctx=new Audio();t.ctx=ctx;const resumed=ctx.resume();resumed.catch(()=>{});
+  $('voiceState').textContent='Изчакване на микрофона…';
   const stream=await navigator.mediaDevices.getUserMedia({audio:true});
   if(t!==take){stream.getTracks().forEach(track=>track.stop());return}
-  t.stream=stream;
-  const type=['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus'].find(v=>MediaRecorder.isTypeSupported(v));
-  const rec=new MediaRecorder(stream,type?{mimeType:type}:undefined),chunks=[];t.recorder=rec;t.mid=crypto.randomUUID();
-  rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
-  rec.onstop=()=>{
-   stopMic(t);if(t!==take)return;
-   t.blob=new Blob(chunks,{type:rec.mimeType||chunks[0]?.type||'audio/webm'});
-   if(t.url)URL.revokeObjectURL(t.url);t.url=URL.createObjectURL(t.blob);
-   $('listen').src=t.url;$('listen').hidden=false;$('voiceState').textContent=t.blob.size?'Записът е готов.':'Празен запис. Опитай отново.';
-   button.textContent='Запиши отново';button.disabled=false;$('sendVoice').disabled=!t.blob.size;
+  t.stream=stream;await resumed;if(t!==take)return;
+  t.source=ctx.createMediaStreamSource(stream);t.processor=ctx.createScriptProcessor(4096,1,1);t.mute=ctx.createGain();t.mute.gain.value=0;
+  t.parts=[];t.samples=0;t.heard=false;t.mid=crypto.randomUUID();t.recording=true;
+  t.processor.onaudioprocess=e=>{
+   if(!t.recording)return;const data=e.inputBuffer.getChannelData(0),pcm=new Int16Array(data.length);
+   for(let i=0;i<data.length;i++){const val=Math.max(-1,Math.min(1,data[i]));pcm[i]=val*(val<0?32768:32767);if(Math.abs(val)>.0001)t.heard=true}
+   t.samples+=pcm.length;t.parts.push(pcm);
+   if(t.samples>=Math.min(ctx.sampleRate*300,9000000))finishRecording(t);
   };
-  rec.start(1000);const start=Date.now();
-  function tick(){const sec=Math.floor((Date.now()-start)/1000);$('voiceState').textContent='● Запис · '+Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');if(sec>=300&&rec.state==='recording')rec.stop()}
-  $('listen').pause();$('listen').hidden=true;$('sendVoice').disabled=true;tick();t.timer=setInterval(tick,500);button.textContent='■ Спри записа';
- }catch(e){stopMic(t);if(t===take)$('voiceState').textContent=e.name==='NotAllowedError'?'Разреши достъп до микрофона от настройките на браузъра.':e.message}
+  t.source.connect(t.processor);t.processor.connect(t.mute);t.mute.connect(ctx.destination);
+  const tick=()=>{const sec=Math.floor(t.samples/ctx.sampleRate);$('voiceState').textContent='● Запис · '+Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0')+(t.heard?'':' · изчакване на звук')};
+  stream.getAudioTracks()[0].onended=()=>finishRecording(t);
+  tick();t.timer=setInterval(tick,400);button.textContent='■ Спри записа';
+ }catch(e){stopMic(t);if(t===take)$('voiceState').textContent=e.name==='NotAllowedError'?'Достъпът до микрофона е отказан. Разреши го в настройките за този сайт.':e.message}
  finally{if(t===take)button.disabled=false}
 };
 $('sendVoice').onclick=async()=>{
  const t=take;if(!t?.blob)return;
  const btn=$('sendVoice');btn.disabled=true;$('record').disabled=true;
- const data=new FormData(),ext=t.blob.type.includes('mp4')?'m4a':t.blob.type.includes('ogg')?'ogg':'webm';
+ const data=new FormData(),ext='wav';
  data.set('op','message');data.set('id',t.thread);data.set('mid',t.mid);data.set('author',t.author);data.set('files',new File([t.blob],'voice-'+t.mid+'.'+ext,{type:t.blob.type}));
  try{await api('',data);if(t===take)$('voicing').close();await refresh()}
  catch(e){if(t===take){$('voiceState').textContent=e.message;btn.disabled=false;$('record').disabled=false}}
