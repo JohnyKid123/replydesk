@@ -191,7 +191,7 @@ $('sendVoice').onclick=async()=>{
  const t=take;if(!t?.blob)return;
  const btn=$('sendVoice');btn.disabled=true;$('record').disabled=true;
  const data=new FormData(),ext=t.blob.type.includes('mp4')?'m4a':t.blob.type.includes('ogg')?'ogg':'webm';
- data.set('op','message');data.set('id',t.thread);data.set('mid',t.mid);data.set('author',t.author);data.set('files',t.blob,'voice-'+t.mid+'.'+ext);
+ data.set('op','message');data.set('id',t.thread);data.set('mid',t.mid);data.set('author',t.author);data.set('files',new File([t.blob],'voice-'+t.mid+'.'+ext,{type:t.blob.type}));
  try{await api('',data);if(t===take)$('voicing').close();await refresh()}
  catch(e){if(t===take){$('voiceState').textContent=e.message;btn.disabled=false;$('record').disabled=false}}
 };
