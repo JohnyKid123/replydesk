@@ -20,13 +20,20 @@ const drafts=new Map(),urls=new Set(),ids=new WeakMap();
 function node(tag,text,cls){const e=document.createElement(tag);e.textContent=text||'';if(cls)e.className=cls;return e}
 function identity(){ $('initial').textContent=author?author[0].toUpperCase():'•';$('rename').textContent=author||'Твоето име';}
 let registered=[],profileLoaded=false;
+async function deriveKey(name,password){
+  const enc=new TextEncoder();
+  const material=await crypto.subtle.importKey('raw',enc.encode(password),'PBKDF2',false,['deriveBits']);
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:enc.encode('Replydesk:'+room+':'+name),iterations:310000},material,256);
+  return Array.from(new Uint8Array(bits),n=>n.toString(16).padStart(2,'0')).join('');
+}
 function profileHint(){
  const name=$('name').value,exists=registered.includes(name),password=$('personalPassword');
  const trusted=Boolean(remembered(name));
  password.closest('label').hidden=!profileLoaded||!name||trusted;
  password.disabled=trusted||!name;password.required=Boolean(name)&&!trusted;
- password.minLength=exists?1:12;password.autocomplete=exists?'current-password':'new-password';
- $('profileHelp').textContent=!profileLoaded?'Проверяване на профилите…':!name?'Избери личния си профил.':trusted?'Профилът е запомнен в този браузър.':exists?'Отключи профила еднократно за този браузър.':'Първо активиране. Създай своя парола от поне 12 знака.';
+ $('changePass').hidden=!trusted||name!==author||!profileLoaded||!name;
+ password.minLength=1;password.autocomplete=exists?'current-password':'new-password';
+ $('profileHelp').textContent=!profileLoaded?'Проверяване на профилите…':!name?'Избери личния си профил.':trusted?'Профилът е запомнен в този браузър.':exists?'Отключи профила еднократно за този браузър.':'Първо активиране. Създай своя парола от точно 4 символа.';
  $('unlock').disabled=!profileLoaded||!name;
  $('unlock').textContent=trusted?'Избери профила':exists?'Отключи':'Активирай профила';
 }
@@ -43,10 +50,8 @@ $('nameForm').onsubmit=async e=>{
  try{
   let key=remembered(name);
   if(!key){
-  const enc=new TextEncoder();
-  const material=await crypto.subtle.importKey('raw',enc.encode(password),'PBKDF2',false,['deriveBits']);
-  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:enc.encode('Replydesk:'+room+':'+name),iterations:310000},material,256);
-  key=Array.from(new Uint8Array(bits),n=>n.toString(16).padStart(2,'0')).join('');
+  if(!registered.includes(name)&&[...password].length!==4)throw Error('Паролата трябва да е точно 4 символа.');
+  key=await deriveKey(name,password);
   }
   const data=new FormData();data.set('op','profile');data.set('name',name);data.set('profileKey',key);data.set('setup',registered.includes(name)?'0':'1');
   await api('',data);localStorage.setItem(savedProfileKey(name),key);account={name,key};author=name;localStorage.setItem(sessionKey,JSON.stringify(account));identity();messageStamp='';$('personalPassword').value='';$('identity').close();
@@ -60,7 +65,11 @@ for(const b of document.querySelectorAll('[data-close]'))b.onclick=()=>b.closest
 async function api(query='',form=null,binary=false){
  if(form&&!form.has('profileKey')&&account.key)form.set('profileKey',account.key);
  const r=await fetch(host+query,{method:form?'POST':'GET',headers:{'x-room':room},body:form,cache:'no-store',credentials:'omit'});
- if(r.status===401){author='';account={};localStorage.removeItem(sessionKey);identity()}
+ if(r.status===401){
+  const name=form?.get('name')||account.name;
+  if(remembered(name)===form?.get('profileKey'))localStorage.removeItem(savedProfileKey(name));
+  if(account.key===form?.get('profileKey')){author='';account={};localStorage.removeItem(sessionKey);identity()}
+ }
  if(!r.ok){const data=await r.json().catch(()=>({}));throw Error(data.error||'Грешка при връзката ('+r.status+'). Опитай отново.')}
  return binary?r.blob():r.json();
 }
@@ -309,4 +318,18 @@ $('sendVoice').onclick=async()=>{
  data.set('op','message');data.set('id',t.thread);data.set('mid',t.mid);data.set('author',t.author);data.set('files',new File([t.blob],'voice-'+t.mid+'.'+ext,{type:t.blob.type}));
  try{await api('',data);if(t===take)$('voicing').close();await refresh()}
  catch(e){if(t===take){$('voiceState').textContent=e.message;btn.disabled=false;$('record').disabled=false}}
+};
+
+$('changePass').onclick=()=>{$('newPass').value='';$('passError').textContent='';$('passDialog').showModal()};
+$('passForm').onsubmit=async e=>{
+ e.preventDefault();const password=$('newPass').value,button=e.currentTarget.querySelector('button.primary');
+ if([...password].length!==4){$('passError').textContent='Паролата трябва да е точно 4 символа.';return}
+ button.disabled=true;
+ try{
+  const name=author,key=await deriveKey(name,password),data=new FormData();
+  data.set('op','changePassword');data.set('replacement',key);
+  await api('',data);
+  account={name,key};localStorage.setItem(sessionKey,JSON.stringify(account));localStorage.setItem(savedProfileKey(name),key);
+  $('newPass').value='';$('passDialog').close();$('identity').close();$('status').textContent='Паролата е сменена.';
+ }catch(err){$('passError').textContent=err.message}finally{button.disabled=false}
 };
