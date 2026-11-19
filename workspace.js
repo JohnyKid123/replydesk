@@ -1,3 +1,4 @@
+const sourceNames = {1: 'Mermer Foods', 2: 'Malatq Pazari'};
 const $=id=>document.getElementById(id);
 const icons={mail:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/>',layers:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18"/>',chat:'<path d="M4 4h16v12H9l-5 4z"/>',check:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',table:'<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M10 9v12"/>',link:'<path d="m10 14 4-4m-6 3-1 1a3 3 0 0 0 4 4l3-3m2-4 1-1a3 3 0 0 0-4-4l-3 3"/>',plus:'<path d="M12 5v14M5 12h14"/>',search:'<circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/>',refresh:'<path d="M20 10a8 8 0 1 0-1 7m1-13v6h-6"/>',clip:'<path d="m8 13 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9"/>'};
 for(const i of document.querySelectorAll('[data-icon]'))i.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true">'+icons[i.dataset.icon]+'</svg>';
@@ -30,12 +31,12 @@ function paint(){
  for(const [k,n] of [['all',items.length],['open',items.filter(t=>!t.done).length],['done',items.filter(t=>t.done).length]])$('n-'+k).textContent=n;
  for(const b of document.querySelectorAll('[data-filter]'))b.classList.toggle('active',!source&&b.dataset.filter===filter);
  for(const b of document.querySelectorAll('[data-source]'))b.classList.toggle('active',Number(b.dataset.source)===source);
- $('listTitle').textContent=source?'Таблица '+source:({all:'Всички имейли',open:'За обсъждане',done:'Готови'})[filter];
+ $('listTitle').textContent=source?sourceNames[source]:({all:'Всички имейли',open:'За обсъждане',done:'Готови'})[filter];
  $('total').textContent=shown.length;$('sheet').hidden=!(source&&sources[source-1]);if(!$('sheet').hidden)$('sheet').href=sources[source-1];
  $('list').replaceChildren(...shown.map(t=>{const b=node('button','','item');b.classList.toggle('active',t.id===active);b.append(node('small',t.done?'✓ Готово':'За обсъждане'),node('b',t.title),node('small',t.lead+' · '+date(t.updated)));b.onclick=()=>select(t.id).catch(report);return b}));
  if(!shown.length)$('list').append(node('p',items.length?'Няма имейли за този избор.':'Още няма имейли. Добави първия от „Нов имейл“.','listEmpty'));
  const t=items.find(t=>t.id===active);$('thread').hidden=!t;$('empty').hidden=!!t;
- if(t){$('subject').textContent=t.title;$('tag').textContent=t.done?'✓ ГОТОВО':'ЗА ОБСЪЖДАНЕ';$('lead').textContent=t.lead+' · Таблица '+t.source+(t.rownum?' · ред '+t.rownum:'');$('done').textContent=t.done?'Върни за обсъждане':'✓ Готово'}
+ if(t){$('subject').textContent=t.title;$('tag').textContent=t.done?'✓ ГОТОВО':'ЗА ОБСЪЖДАНЕ';$('lead').textContent=t.lead+' · '+sourceNames[t.source]+(t.rownum?' · ред '+t.rownum:'');$('done').textContent=t.done?'Върни за обсъждане':'✓ Готово'}
 }
 function report(e){$('status').textContent=e.message||'Връзката прекъсна. Натисни „Обнови“.'}
 function fileLabels(form){form.querySelector('.chosen').textContent=Array.from(form.elements.files.files,x=>x.name).join(', ')}
