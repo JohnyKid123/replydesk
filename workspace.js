@@ -26,6 +26,13 @@ async function api(query='',form=null,binary=false){
  return binary?r.blob():r.json();
 }
 function date(v){return new Date(v).toLocaleString('bg-BG',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}
+function mailLabels(thread) {
+ const labels=node('span','','mail-labels');
+ const company=node('span',sourceNames[thread.source],'company-badge');
+ company.classList.add(Number(thread.source)===1?'company-mermer':'company-malatq');
+ labels.append(company,node('small',thread.done?'✓ Готово':'За обсъждане'));
+ return labels;
+}
 function paint(){
  const shown=items.filter(t=>(!source||t.source===source)&&(filter==='all'||Boolean(t.done)===(filter==='done'))&&(t.lead+' '+t.title).toLowerCase().includes($('search').value.trim().toLowerCase()));
  for(const [k,n] of [['all',items.length],['open',items.filter(t=>!t.done).length],['done',items.filter(t=>t.done).length]])$('n-'+k).textContent=n;
@@ -33,10 +40,10 @@ function paint(){
  for(const b of document.querySelectorAll('[data-source]'))b.classList.toggle('active',Number(b.dataset.source)===source);
  $('listTitle').textContent=source?sourceNames[source]:({all:'Всички имейли',open:'За обсъждане',done:'Готови'})[filter];
  $('total').textContent=shown.length;$('sheet').hidden=!(source&&sources[source-1]);if(!$('sheet').hidden)$('sheet').href=sources[source-1];
- $('list').replaceChildren(...shown.map(t=>{const b=node('button','','item');b.classList.toggle('active',t.id===active);b.append(node('small',t.done?'✓ Готово':'За обсъждане'),node('b',t.title),node('small',t.lead+' · '+date(t.updated)));b.onclick=()=>select(t.id).catch(report);return b}));
+ $('list').replaceChildren(...shown.map(t=>{const b=node('button','','item');b.classList.toggle('active',t.id===active);b.append(mailLabels(t),node('b',t.title),node('small',t.lead+' · '+date(t.updated)));b.onclick=()=>select(t.id).catch(report);return b}));
  if(!shown.length)$('list').append(node('p',items.length?'Няма имейли за този избор.':'Още няма имейли. Добави първия от „Нов имейл“.','listEmpty'));
  const t=items.find(t=>t.id===active);$('thread').hidden=!t;$('empty').hidden=!!t;
- if(t){$('subject').textContent=t.title;$('tag').textContent=t.done?'✓ ГОТОВО':'ЗА ОБСЪЖДАНЕ';$('lead').textContent=t.lead+' · '+sourceNames[t.source]+(t.rownum?' · ред '+t.rownum:'');$('done').textContent=t.done?'Върни за обсъждане':'✓ Готово'}
+ if(t){$('subject').textContent=t.title;$('tag').replaceChildren(mailLabels(t));$('lead').textContent=t.lead+(t.rownum?' · ред '+t.rownum:'');$('done').textContent=t.done?'Върни за обсъждане':'✓ Готово'}
 }
 function report(e){$('status').textContent=e.message||'Връзката прекъсна. Натисни „Обнови“.'}
 function fileLabels(form){form.querySelector('.chosen').textContent=Array.from(form.elements.files.files,x=>x.name).join(', ')}
