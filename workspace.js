@@ -1,6 +1,6 @@
 const sourceNames = {1: 'Mermer Foods', 2: 'Malatq Pazari'};
 const $=id=>document.getElementById(id);
-const icons={mail:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/>',layers:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18"/>',chat:'<path d="M4 4h16v12H9l-5 4z"/>',check:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',table:'<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M10 9v12"/>',link:'<path d="m10 14 4-4m-6 3-1 1a3 3 0 0 0 4 4l3-3m2-4 1-1a3 3 0 0 0-4-4l-3 3"/>',plus:'<path d="M12 5v14M5 12h14"/>',search:'<circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/>',refresh:'<path d="M20 10a8 8 0 1 0-1 7m1-13v6h-6"/>',clip:'<path d="m8 13 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9"/>'};
+const icons={mic:'<rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4m-4 0h8"/>',mail:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/>',layers:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18"/>',chat:'<path d="M4 4h16v12H9l-5 4z"/>',check:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',table:'<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M10 9v12"/>',link:'<path d="m10 14 4-4m-6 3-1 1a3 3 0 0 0 4 4l3-3m2-4 1-1a3 3 0 0 0-4-4l-3 3"/>',plus:'<path d="M12 5v14M5 12h14"/>',search:'<circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/>',refresh:'<path d="M20 10a8 8 0 1 0-1 7m1-13v6h-6"/>',clip:'<path d="m8 13 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9"/>'};
 for(const i of document.querySelectorAll('[data-icon]'))i.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true">'+icons[i.dataset.icon]+'</svg>';
 const host='https://replydesk-alex-okan.alexvenmil.chatgpt.site/api/desk';
 const valid=k=>/^[0-9a-f]{64}$/.test(k||'');
@@ -10,13 +10,13 @@ const room=valid(incoming)?incoming:valid(saved)?saved:Array.from(crypto.getRand
 localStorage.setItem('replydesk.room',room);
 const invite=new URL(location.href);invite.hash='room='+room;
 history.replaceState(null,'',invite);
-let author=localStorage.getItem('replydesk.author')||'',items=[],sources=[],filter='all',source=0,active='',revision=0,loadVersion=0,messageStamp='',pending=null,busy=false;
+let author=(['Okan','Alex'].find(n=>n.toLowerCase()===(localStorage.getItem('replydesk.author')||'').toLowerCase())||''),items=[],sources=[],filter='all',source=0,active='',revision=0,loadVersion=0,messageStamp='',pending=null,busy=false;
 const drafts=new Map(),urls=new Set(),ids=new WeakMap();
 function node(tag,text,cls){const e=document.createElement(tag);e.textContent=text||'';if(cls)e.className=cls;return e}
 function identity(){ $('initial').textContent=author?author[0].toUpperCase():'•';$('rename').textContent=author||'Твоето име';}
 function named(fn){if(author)return fn();pending=fn;$('identity').showModal();$('name').focus();}
 $('rename').onclick=()=>{$('name').value=author;pending=null;$('identity').showModal()};
-$('nameForm').onsubmit=e=>{e.preventDefault();const v=$('name').value.trim();if(!v)return;author=v;localStorage.setItem('replydesk.author',v);identity();$('identity').close();const fn=pending;pending=null;fn?.()};
+$('nameForm').onsubmit=e=>{e.preventDefault();const v=$('name').value.trim();if(!['Okan','Alex'].includes(v))return;author=v;localStorage.setItem('replydesk.author',v);identity();$('identity').close();const fn=pending;pending=null;fn?.()};
 $('share').onclick=()=>{$('invite').value=invite.href;$('copied').textContent='';$('sharing').showModal()};
 $('copy').onclick=async()=>{try{await navigator.clipboard.writeText(invite.href);$('copied').textContent='Линкът е копиран.'}catch{$('invite').select();$('copied').textContent='Копирай избрания линк.'}};
 for(const b of document.querySelectorAll('[data-close]'))b.onclick=()=>b.closest('dialog').close();
@@ -55,23 +55,25 @@ async function select(id){
  paint();if(id)await messages();
 }
 function entry(m){
- const e=node('div','','entry');e.append(node('b',m.author),node('time',date(m.created)));if(m.body)e.append(node('p',m.body));
+ const e=node('div','','entry');e.dataset.id=m.id;e.classList.toggle('own',m.author===author);e.append(node('b',m.author),node('time',date(m.created)));if(m.body)e.append(node('p',m.body));
  for(const f of JSON.parse(m.files)){
-  const b=node('button','📎 '+f.name,'light');e.append(b);
+  const b=node('button',f.name.startsWith('voice-')?'▶ Гласово съобщение':'📎 '+f.name,'light');e.append(b);
   b.onclick=async()=>{b.disabled=true;const rev=revision;
    try{const blob=await api('?file='+encodeURIComponent(f.key),null,true);if(rev!==revision)return;
     const ext=f.name.split('.').pop().toLowerCase(),mime=({png:'image/png',jpeg:'image/jpeg',jpg:'image/jpeg',webp:'image/webp',gif:'image/gif'})[ext];
-    const url=URL.createObjectURL(new Blob([blob],{type:mime||'application/octet-stream'}));urls.add(url);
-    if(mime){const img=node('img');img.alt=f.name;img.src=url;e.append(img)}
-    const a=node('a','Изтегли '+f.name);a.href=url;a.download=f.name;e.append(a);b.remove();if(!mime)a.click();
+    const audioType=({webm:'audio/webm',ogg:'audio/ogg',mp4:'audio/mp4',m4a:'audio/mp4',mp3:'audio/mpeg',wav:'audio/wav'})[ext];
+    const url=URL.createObjectURL(new Blob([blob],{type:mime||audioType||'application/octet-stream'}));urls.add(url);
+    if(mime){const zoom=node('button','','image-preview');zoom.title='Увеличи снимката';const img=node('img');img.alt=f.name;img.src=url;zoom.append(img);zoom.onclick=()=>showPhoto(url,f.name);e.append(zoom);showPhoto(url,f.name)}
+    if(audioType){const player=node('audio');player.controls=true;player.src=url;e.append(player);player.play().catch(()=>{})}
+    const a=node('a','Изтегли '+f.name);a.href=url;a.download=f.name;e.append(a);b.remove();if(!mime&&!audioType)a.click();
    }catch(err){report(err)}finally{b.disabled=false}
   };
  }
  return e;
 }
 let mVersion=0;
-async function messages(){const ver=++mVersion,id=active;if(!id)return;const all=await api('?id='+id);if(active!==id||ver!==mVersion)return;const stamp=all.map(m=>m.id).join(',');if(stamp===messageStamp)return;messageStamp=stamp;clearUrls();$('history').replaceChildren(...all.map(entry))}
-async function refresh(){const ver=++loadVersion;const all=await api();if(ver!==loadVersion)return;items=all;paint();if(active)await messages();$('status').textContent=''}
+async function messages(){const ver=++mVersion,id=active;if(!id)return;const all=await api('?id='+id);if(active!==id||ver!==mVersion)return;const stamp=all.map(m=>m.id).join(',');if(stamp===messageStamp)return;messageStamp=stamp;const rendered=new Set([...$('history').children].map(e=>e.dataset.id));for(const m of all)if(!rendered.has(m.id))$('history').append(entry(m))}
+async function refresh(){const ver=++loadVersion;const all=await api();if(ver!==loadVersion)return;items=all;if(active&&!all.some(t=>t.id===active))await select('');paint();if(active)await messages();$('status').textContent=''}
 function move(f,s){filter=f;source=s;select('').catch(report)}
 for(const b of document.querySelectorAll('[data-filter]'))b.onclick=()=>move(b.dataset.filter,0);
 for(const b of document.querySelectorAll('[data-source]'))b.onclick=()=>move('all',Number(b.dataset.source));
@@ -93,7 +95,7 @@ for(const form of [$('create'),$('reply')]){
  })};
 }
 let editing;
-$('edit').onclick=()=>{
+$('edit').onclick=()=>named(()=>{
  const thread=items.find(item=>item.id===active);
  if(!thread||thread.done)return;
  editing={...thread};
@@ -101,13 +103,13 @@ $('edit').onclick=()=>{
  for(const key of ['title','lead','source','rownum'])form.elements[key].value=thread[key]??'';
  form.querySelector('.error').textContent='';
  $('editor').showModal();form.elements.title.focus();
-};
+});
 $('editForm').onsubmit=async event=>{
  event.preventDefault();
  const form=event.currentTarget,button=form.querySelector('button.primary');
  if(button.disabled||!editing)return;
  const original=editing, data=new FormData(form);
- data.set('op','edit');data.set('id',original.id);
+ data.set('author',author);data.set('op','edit');data.set('id',original.id);
  data.set('oldTitle',original.title);data.set('oldLead',original.lead);
  data.set('oldSource',original.source);data.set('oldRow',original.rownum||0);
  button.disabled=true;form.querySelector('.error').textContent='';
@@ -122,3 +124,74 @@ $('done').onclick=async()=>{const t=items.find(i=>i.id===active);if(!t||busy)ret
  try{await api('',f);filter=t.done?'open':'done';source=0;await refresh()}catch(e){report(e)}finally{busy=false;$('done').disabled=false}};
 identity();$('list').textContent='Зареждане…';refresh().catch(report);api('?sources=1').then(v=>{sources=v;paint()}).catch(report);
 setInterval(()=>{if(!document.hidden&&!busy&&!document.querySelector('dialog[open]'))refresh().catch(report)},12000);
+
+let deleteTarget='';
+$('deleteMail').onclick=()=>{
+ const t=items.find(i=>i.id===active);if(!t)return;
+ deleteTarget=t.id;$('deleteTitle').textContent=t.title;$('deleteError').textContent='';$('deleting').showModal();
+};
+$('confirmDelete').onclick=async()=>{
+ const button=$('confirmDelete');button.disabled=true;
+ const data=new FormData();data.set('op','delete');data.set('id',deleteTarget);
+ try{await api('',data);$('deleting').close();if(active===deleteTarget)await select('');drafts.delete(deleteTarget);await refresh()}
+ catch(e){$('deleteError').textContent=e.message}finally{button.disabled=false}
+};
+
+let scale=1;
+function zoomPhoto(value){
+ scale=Math.min(6,Math.max(1,value));$('photo').style.width=(scale*100)+'%';
+ $('fit').textContent=Math.round(scale*100)+'%';$('smaller').disabled=scale===1;$('larger').disabled=scale===6;
+}
+function showPhoto(url,name){
+ $('photoName').textContent=name;$('photo').alt=name;$('photo').src=url;
+ zoomPhoto(1);$('viewer').showModal();$('viewer').querySelector('.pan').scrollTo(0,0);
+}
+$('larger').onclick=()=>zoomPhoto(scale+.5);$('smaller').onclick=()=>zoomPhoto(scale-.5);
+$('fit').onclick=()=>zoomPhoto(1);$('photo').ondblclick=()=>zoomPhoto(scale===1?2:1);
+
+let take=null;
+function stopMic(t){clearInterval(t.timer);t.stream?.getTracks().forEach(track=>track.stop())}
+function releaseTake(){
+ const t=take;take=null;if(!t)return;
+ if(t.recorder?.state==='recording')t.recorder.stop();
+ stopMic(t);if(t.url)URL.revokeObjectURL(t.url);$('listen').pause();$('listen').removeAttribute('src');$('listen').load();
+}
+$('voicing').addEventListener('close',releaseTake);
+$('voice').onclick=()=>named(()=>{
+ if(!active)return;releaseTake();take={thread:active,author,mid:crypto.randomUUID()};
+ $('listen').hidden=true;$('record').disabled=false;$('record').textContent='Започни запис';$('sendVoice').disabled=true;
+ $('voiceState').textContent='Можеш да чуеш записа преди изпращане.';$('voicing').showModal();
+});
+$('record').onclick=async()=>{
+ const t=take;if(!t)return;
+ if(t.recorder?.state==='recording'){t.recorder.stop();return}
+ const button=$('record');button.disabled=true;
+ try{
+  if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)throw Error('Браузърът не поддържа запис. Можеш да прикачиш аудиофайл.');
+  const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+  if(t!==take){stream.getTracks().forEach(track=>track.stop());return}
+  t.stream=stream;
+  const type=['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus'].find(v=>MediaRecorder.isTypeSupported(v));
+  const rec=new MediaRecorder(stream,type?{mimeType:type}:undefined),chunks=[];t.recorder=rec;t.mid=crypto.randomUUID();
+  rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+  rec.onstop=()=>{
+   stopMic(t);if(t!==take)return;
+   t.blob=new Blob(chunks,{type:rec.mimeType||chunks[0]?.type||'audio/webm'});
+   if(t.url)URL.revokeObjectURL(t.url);t.url=URL.createObjectURL(t.blob);
+   $('listen').src=t.url;$('listen').hidden=false;$('voiceState').textContent=t.blob.size?'Записът е готов.':'Празен запис. Опитай отново.';
+   button.textContent='Запиши отново';button.disabled=false;$('sendVoice').disabled=!t.blob.size;
+  };
+  rec.start(1000);const start=Date.now();
+  function tick(){const sec=Math.floor((Date.now()-start)/1000);$('voiceState').textContent='● Запис · '+Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');if(sec>=300&&rec.state==='recording')rec.stop()}
+  $('listen').pause();$('listen').hidden=true;$('sendVoice').disabled=true;tick();t.timer=setInterval(tick,500);button.textContent='■ Спри записа';
+ }catch(e){stopMic(t);if(t===take)$('voiceState').textContent=e.name==='NotAllowedError'?'Разреши достъп до микрофона от настройките на браузъра.':e.message}
+ finally{if(t===take)button.disabled=false}
+};
+$('sendVoice').onclick=async()=>{
+ const t=take;if(!t?.blob)return;
+ const btn=$('sendVoice');btn.disabled=true;$('record').disabled=true;
+ const data=new FormData(),ext=t.blob.type.includes('mp4')?'m4a':t.blob.type.includes('ogg')?'ogg':'webm';
+ data.set('op','message');data.set('id',t.thread);data.set('mid',t.mid);data.set('author',t.author);data.set('files',t.blob,'voice-'+t.mid+'.'+ext);
+ try{await api('',data);if(t===take)$('voicing').close();await refresh()}
+ catch(e){if(t===take){$('voiceState').textContent=e.message;btn.disabled=false;$('record').disabled=false}}
+};
