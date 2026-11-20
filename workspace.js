@@ -96,34 +96,55 @@ function paint(){
 }
 function report(e){$('status').textContent=e.message||'Връзката прекъсна. Натисни „Обнови“.'}
 
+function currentMail(text) {
+ return text.normalize('NFKC').replace(/[\u200b-\u200d]/g,'').split(/^\s*(?:-{2,}\s*(?:original message|forwarded message|първоначално съобщение)|On .{3,180} wrote:|На .{3,180} написа:)/im)[0].split('\n').filter(line=>!line.trimStart().startsWith('>')).join('\n');
+}
 function screenshotSubject(text) {
- const topics = [
-  [/price list|pricing|quotation|ценова оферта|ценова листа|цени/i, 'Запитване за цени'],
-  [/samples?|мостри/i, 'Запитване за мостри'],
-  [/catalog|каталог/i, 'Продуктов каталог'],
-  [/delivery|shipping|доставка/i, 'Условия за доставка'],
-  [/distribut|дистриб/i, 'Обсъждане на дистрибуция'],
-  [/partnership|collaborat|партньорство/i, 'Предложение за партньорство']
+ const topics=[
+  [/minimum order|\bmoq\b|минимална поръчка/i,'Минимална поръчка'],
+  [/not interested|нямаме интерес|не проявяваме интерес/i,'Отказ от предложение'],
+  [/price list|pricing|prices?|quotation|ценова оферта|ценова листа|цени|fiyat/i,'Запитване за цени'],
+  [/samples?|мостри|numune/i,'Запитване за мостри'],
+  [/catalog|каталог|katalog/i,'Продуктов каталог'],
+  [/delivery|shipping|доставка|teslimat/i,'Условия за доставка'],
+  [/payment terms|условия за плащане/i,'Условия за плащане'],
+  [/distribut|дистриб/i,'Обсъждане на дистрибуция'],
+  [/appointment|meeting|среща/i,'Уговаряне на среща'],
+  [/partnership|collaborat|партньорство|cooperation/i,'Предложение за партньорство']
  ];
- const subject = text.match(/(?:^|\n)\s*(?:subject|тема|относно|betreff|konu)\s*[:：]\s*(.+)/iu)?.[1] || '';
- function topic(line) { return topics.find(([pattern]) => pattern.test(line))?.[1] }
- function keywords(line) {
-  const words = line.replace(/^(?:(?:re|fw|fwd|отг)\s*:\s*)+/i,'').match(/[\p{L}\p{N}][\p{L}\p{N}-]*/gu) || [];
-  return words.slice(0,3).join(' ');
- }
- return topic(subject) || (keywords(subject).includes(' ') && keywords(subject)) || topic(text) || '';
+ const lines=currentMail(text).split('\n').map(line=>line.trim()).filter(Boolean);
+ const header=/^(?:subject|тема|относно|betreff|konu|objet|asunto)\s*[:：\-]\s*/iu;
+ const at=lines.findIndex(line=>header.test(line));
+ const subject=at<0?'':(lines[at].replace(header,'')||lines[at+1]||'').replace(/^(?:(?:re|fw|fwd|отг|aw)\s*:\s*)+/i,'');
+ const body=lines.filter(line=>!header.test(line)&&!/@|^(?:from|to|cc|от|до|sent|date)\s*:/i.test(line));
+ const topic=line=>topics.find(([pattern])=>pattern.test(line))?.[1];
+ const request=body.find(line=>/please|could you|would like|interested|моля|бихме|може ли|искаме/i.test(line)&&topic(line));
+ const words=subject.match(/[\p{L}\p{N}][\p{L}\p{N}-]*/gu)||[];
+ return topic(subject)||(request&&topic(request))||(words.length>=2&&words.slice(0,3).join(' '))||topic(body.join(' '))||'';
 }
 function screenshotCountry(text) {
  const codes = 'AW AF AO AI AX AL AD AE AR AM AS AQ TF AG AU AT AZ BI BE BJ BQ BF BD BG BH BS BA BL BY BZ BM BO BR BB BN BT BV BW CF CA CC CH CL CN CI CM CD CG CK CO KM CV CR CU CW CX KY CY CZ DE DJ DM DK DO DZ EC EG ER EH ES EE ET FI FJ FK FR FO FM GA GB GE GG GH GI GN GP GM GW GQ GR GD GL GT GF GU GY HK HM HN HR HT HU ID IM IN IO IE IR IQ IS IL IT JM JE JO JP KZ KE KG KH KI KN KR KW LA LB LR LY LC LI LK LS LT LU LV MO MF MA MC MD MG MV MX MH MK ML MT MM ME MN MP MZ MR MS MQ MU MW MY YT NA NC NE NF NG NI NU NL NO NP NR NZ OM PK PA PN PE PH PW PG PL PR KP PT PY PS PF QA RE RO RU RW SA SD SN SG GS SH SJ SB SL SV SM SO PM RS SS ST SR SK SI SE SZ SX SC SY TC TD TG TH TJ TK TM TL TO TT TN TR TV TW TZ UG UA UM UY US UZ VA VC VE VG VI VN VU WF WS YE ZA ZM ZW'.split(' ');
- const bg = new Intl.DisplayNames(['bg'], {type:'region'});
- const en = new Intl.DisplayNames(['en'], {type:'region'});
- const normalized = ' '+text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ')+' ';
- const aliases = {GB:['united kingdom','uk'],US:['usa','united states of america'],TR:['turkey','türkiye'],AE:['uae']};
- const matches = codes.filter(code => [bg.of(code),en.of(code),...(aliases[code]||[])].some(name => normalized.includes(' '+name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim()+' ')));
- if(matches.length===1)return bg.of(matches[0]);
- if(matches.length)return '';
- const domains = [...text.matchAll(/@[\w.-]+\.([a-z]{2})\b/gi)].map(m=>m[1].toUpperCase()).map(c=>c==='UK'?'GB':c).filter(c=>codes.includes(c)&&!['IO','AI','CO','ME','TV','CC'].includes(c));
- return new Set(domains).size===1 ? bg.of(domains[0]) : '';
+ const bg=new Intl.DisplayNames(['bg'],{type:'region'});
+ const en=new Intl.DisplayNames(['en'],{type:'region'});
+ const aliases={GB:['uk','great britain'],US:['usa','united states of america'],TR:['turkey','türkiye'],AE:['uae'],DE:['deutschland'],FR:['république française'],ES:['españa'],IT:['italia'],NL:['nederland'],GR:['hellas','ελλάδα'],PL:['polska'],RO:['românia']};
+ const normalize=s=>s.toLowerCase().normalize('NFD').replace(/\p{M}/gu,'').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+ const scores=new Map();
+ const record=(code,score)=>scores.set(code,Math.max(score,scores.get(code)||0));
+ for(const line of currentMail(text).split('\n')){
+  if(/^\s*(?:to|до|cc|bcc|subject|тема|относно)\s*:/i.test(line))continue;
+  const sender=/^\s*(?:from|от|sender|подател|von|kimden)\s*:/i.test(line);
+  const location=/(?:address|country|based in|registered office|located in|адрес|държава|седалище)\s*[:\s]/i.test(line);
+  const normalized=' '+normalize(line)+' ';
+  for(const code of codes){
+   if([bg.of(code),en.of(code),...(aliases[code]||[])].some(name=>normalized.includes(' '+normalize(name)+' ')))record(code,location?5:sender?4:2);
+  }
+  for(const match of line.matchAll(/@[\w.-]+\.([a-z]{2})\b/gi)){
+   const suffix=match[1].toUpperCase(),code=suffix==='UK'?'GB':suffix;
+   if(codes.includes(code)&&!['IO','AI','CO','ME','TV','CC'].includes(code))record(code,sender?4:1);
+  }
+ }
+ const ranked=[...scores].sort((a,b)=>b[1]-a[1]);
+ return ranked.length&&ranked[0][1]!==ranked[1]?.[1]?bg.of(ranked[0][0]):'';
 }
 let libraryLoad;
 function loadReader() {
@@ -138,12 +159,46 @@ function loadReader() {
  });
  return libraryLoad;
 }
+async function prepareScreenshot(file) {
+ if(typeof createImageBitmap!=='function')return file;
+ let image;
+ try{
+  image=await createImageBitmap(file);
+  const scale=Math.min(2,3200/image.width,4000/image.height);
+  const canvas=document.createElement('canvas');
+  canvas.width=Math.max(1,Math.round(image.width*scale));
+  canvas.height=Math.max(1,Math.round(image.height*scale));
+  const ctx=canvas.getContext('2d',{willReadFrequently:true});
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(image,0,0,canvas.width,canvas.height);
+  const pixels=ctx.getImageData(0,0,canvas.width,canvas.height);
+  const data=pixels.data;
+  let dark=0,total=0;
+  for(let i=0;i<data.length;i+=4*131){if((data[i]+data[i+1]+data[i+2])/3<100)dark++;total++}
+  const invert=dark>total*.6;
+  for(let i=0;i<data.length;i+=4){
+   const gray=.299*data[i]+.587*data[i+1]+.114*data[i+2];
+   data[i]=data[i+1]=data[i+2]=((invert?255-gray:gray)-128)*1.22+128;
+  }
+  ctx.putImageData(pixels,0,0);
+  return canvas;
+ }catch{return file}finally{image?.close()}
+}
+const suggestedValues=new WeakMap();
+function updateSuggestion(input,value){
+ if(!input.value.trim()||input.value===suggestedValues.get(input)){
+  input.value=value;
+  suggestedValues.set(input,value);
+ }
+}
 let scanNumber=0;
 async function suggestFromScreenshot(form) {
  const number=++scanNumber;
  const status=$('scanStatus');
  status.textContent='';
  const file=Array.from(form.elements.files.files).reverse().find(f=>f.type.startsWith('image/'));
+ updateSuggestion(form.elements.title,'');
+ updateSuggestion(form.elements.lead,'');
  if(!file||file.size>20*1024*1024)return;
  status.textContent='Разпознаване на текста от снимката…';
  let reader;
@@ -154,12 +209,20 @@ async function suggestFromScreenshot(form) {
   const failure=new Promise((_,reject)=>{onFailure=reject});
   reader=await Promise.race([lib.createWorker('eng+bul',1,{errorHandler:onFailure}),failure]);
   if(scanNumber!==number)return;
-  const result=await Promise.race([reader.recognize(file),failure]);
+  const input=await prepareScreenshot(file);
+  if(scanNumber!==number)return;
+  let result=await Promise.race([reader.recognize(input),failure]);
+  if(scanNumber!==number)return;
+  if(result.data.confidence<60||result.data.text.trim().length<20){
+   await reader.setParameters({tessedit_pageseg_mode:lib.PSM.SPARSE_TEXT});
+   const retry=await Promise.race([reader.recognize(file),failure]);
+   if(retry.data.text.trim()&&retry.data.confidence>=result.data.confidence)result=retry;
+  }
   if(scanNumber!==number)return;
   const text=result.data.text;
   const {title,lead}=form.elements;
-  if(!title.value.trim())title.value=screenshotSubject(text);
-  if(!lead.value.trim())lead.value=screenshotCountry(text);
+  updateSuggestion(title,screenshotSubject(text));
+  updateSuggestion(lead,screenshotCountry(text));
   status.textContent=title.value&&lead.value?'Провери темата и държавата.':'Провери предложенията и попълни празните полета.';
  } catch {
   if(scanNumber===number)status.textContent='Снимката не беше разчетена. Въведи темата и държавата.';
@@ -290,6 +353,7 @@ for(const b of document.querySelectorAll('[data-filter]'))b.onclick=()=>move(b.d
 for(const b of document.querySelectorAll('[data-source]'))b.onclick=()=>move('all',Number(b.dataset.source));
 $('search').oninput=paint;$('refresh').onclick=()=>refresh().catch(report);
 $('add').onclick=()=>{if(source)$('create').elements.source.value=source;$('composer').showModal()};
+$('create').addEventListener('input',event=>suggestedValues.delete(event.target));
 $('create').addEventListener('reset',()=>{scanNumber++;$('scanStatus').textContent=''});
 for(const form of [$('create'),$('reply')]){
  const filesChanged=()=>{fileLabels(form);if(form.id==='create')suggestFromScreenshot(form)};
