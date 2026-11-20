@@ -95,6 +95,79 @@ function paint(){
  if(t){$('subject').textContent=t.title;$('tag').replaceChildren(mailLabels(t));$('lead').textContent=t.lead+(t.rownum?' · ред '+t.rownum:'');$('done').textContent=t.done?'Върни за обсъждане':'✓ Готово'}
 }
 function report(e){$('status').textContent=e.message||'Връзката прекъсна. Натисни „Обнови“.'}
+
+function screenshotSubject(text) {
+ const topics = [
+  [/price list|pricing|quotation|ценова оферта|ценова листа|цени/i, 'Запитване за цени'],
+  [/samples?|мостри/i, 'Запитване за мостри'],
+  [/catalog|каталог/i, 'Продуктов каталог'],
+  [/delivery|shipping|доставка/i, 'Условия за доставка'],
+  [/distribut|дистриб/i, 'Обсъждане на дистрибуция'],
+  [/partnership|collaborat|партньорство/i, 'Предложение за партньорство']
+ ];
+ const subject = text.match(/(?:^|\n)\s*(?:subject|тема|относно|betreff|konu)\s*[:：]\s*(.+)/iu)?.[1] || '';
+ function topic(line) { return topics.find(([pattern]) => pattern.test(line))?.[1] }
+ function keywords(line) {
+  const words = line.replace(/^(?:(?:re|fw|fwd|отг)\s*:\s*)+/i,'').match(/[\p{L}\p{N}][\p{L}\p{N}-]*/gu) || [];
+  return words.slice(0,3).join(' ');
+ }
+ return topic(subject) || (keywords(subject).includes(' ') && keywords(subject)) || topic(text) || '';
+}
+function screenshotCountry(text) {
+ const codes = 'AW AF AO AI AX AL AD AE AR AM AS AQ TF AG AU AT AZ BI BE BJ BQ BF BD BG BH BS BA BL BY BZ BM BO BR BB BN BT BV BW CF CA CC CH CL CN CI CM CD CG CK CO KM CV CR CU CW CX KY CY CZ DE DJ DM DK DO DZ EC EG ER EH ES EE ET FI FJ FK FR FO FM GA GB GE GG GH GI GN GP GM GW GQ GR GD GL GT GF GU GY HK HM HN HR HT HU ID IM IN IO IE IR IQ IS IL IT JM JE JO JP KZ KE KG KH KI KN KR KW LA LB LR LY LC LI LK LS LT LU LV MO MF MA MC MD MG MV MX MH MK ML MT MM ME MN MP MZ MR MS MQ MU MW MY YT NA NC NE NF NG NI NU NL NO NP NR NZ OM PK PA PN PE PH PW PG PL PR KP PT PY PS PF QA RE RO RU RW SA SD SN SG GS SH SJ SB SL SV SM SO PM RS SS ST SR SK SI SE SZ SX SC SY TC TD TG TH TJ TK TM TL TO TT TN TR TV TW TZ UG UA UM UY US UZ VA VC VE VG VI VN VU WF WS YE ZA ZM ZW'.split(' ');
+ const bg = new Intl.DisplayNames(['bg'], {type:'region'});
+ const en = new Intl.DisplayNames(['en'], {type:'region'});
+ const normalized = ' '+text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ')+' ';
+ const aliases = {GB:['united kingdom','uk'],US:['usa','united states of america'],TR:['turkey','türkiye'],AE:['uae']};
+ const matches = codes.filter(code => [bg.of(code),en.of(code),...(aliases[code]||[])].some(name => normalized.includes(' '+name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim()+' ')));
+ if(matches.length===1)return bg.of(matches[0]);
+ if(matches.length)return '';
+ const domains = [...text.matchAll(/@[\w.-]+\.([a-z]{2})\b/gi)].map(m=>m[1].toUpperCase()).map(c=>c==='UK'?'GB':c).filter(c=>codes.includes(c)&&!['IO','AI','CO','ME','TV','CC'].includes(c));
+ return new Set(domains).size===1 ? bg.of(domains[0]) : '';
+}
+let libraryLoad;
+function loadReader() {
+ if(!libraryLoad)libraryLoad=new Promise((resolve,reject)=>{
+  const script=document.createElement('script');
+  script.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+  script.integrity='sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F';
+  script.crossOrigin='anonymous';
+  script.onload=()=>resolve(window.Tesseract);
+  script.onerror=()=>{libraryLoad=null;script.remove();reject(Error('OCR'))};
+  document.head.append(script);
+ });
+ return libraryLoad;
+}
+let scanNumber=0;
+async function suggestFromScreenshot(form) {
+ const number=++scanNumber;
+ const status=$('scanStatus');
+ status.textContent='';
+ const file=Array.from(form.elements.files.files).reverse().find(f=>f.type.startsWith('image/'));
+ if(!file||file.size>20*1024*1024)return;
+ status.textContent='Разпознаване на текста от снимката…';
+ let reader;
+ try {
+  const lib=await loadReader();
+  if(scanNumber!==number)return;
+  let onFailure;
+  const failure=new Promise((_,reject)=>{onFailure=reject});
+  reader=await Promise.race([lib.createWorker('eng+bul',1,{errorHandler:onFailure}),failure]);
+  if(scanNumber!==number)return;
+  const result=await Promise.race([reader.recognize(file),failure]);
+  if(scanNumber!==number)return;
+  const text=result.data.text;
+  const {title,lead}=form.elements;
+  if(!title.value.trim())title.value=screenshotSubject(text);
+  if(!lead.value.trim())lead.value=screenshotCountry(text);
+  status.textContent=title.value&&lead.value?'Провери темата и държавата.':'Провери предложенията и попълни празните полета.';
+ } catch {
+  if(scanNumber===number)status.textContent='Снимката не беше разчетена. Въведи темата и държавата.';
+ } finally {
+  if(reader)await reader.terminate();
+ }
+}
+
 function fileLabels(form){form.querySelector('.chosen').textContent=Array.from(form.elements.files.files,x=>x.name).join(', ')}
 function clearUrls(){for(const url of urls)URL.revokeObjectURL(url);urls.clear()}
 async function select(id){
@@ -179,9 +252,11 @@ for(const b of document.querySelectorAll('[data-filter]'))b.onclick=()=>move(b.d
 for(const b of document.querySelectorAll('[data-source]'))b.onclick=()=>move('all',Number(b.dataset.source));
 $('search').oninput=paint;$('refresh').onclick=()=>refresh().catch(report);
 $('add').onclick=()=>{if(source)$('create').elements.source.value=source;$('composer').showModal()};
+$('create').addEventListener('reset',()=>{scanNumber++;$('scanStatus').textContent=''});
 for(const form of [$('create'),$('reply')]){
- form.elements.files.onchange=()=>fileLabels(form);
- form.onpaste=e=>{const files=Array.from(e.clipboardData?.files||[]);if(!files.length)return;e.preventDefault();const dt=new DataTransfer();for(const f of [...form.elements.files.files,...files])dt.items.add(f);form.elements.files.files=dt.files;fileLabels(form)};
+ const filesChanged=()=>{fileLabels(form);if(form.id==='create')suggestFromScreenshot(form)};
+ form.elements.files.onchange=filesChanged;
+ form.onpaste=e=>{const files=Array.from(e.clipboardData?.files||[]);if(!files.length)return;e.preventDefault();const dt=new DataTransfer();for(const f of [...form.elements.files.files,...files])dt.items.add(f);form.elements.files.files=dt.files;filesChanged()};
  form.onsubmit=e=>{e.preventDefault();named(async()=>{
   if(busy)return;const isNew=form.id==='create',fd=new FormData(form),error=form.querySelector('.error');error.textContent='';
   if(!String(fd.get('body')||'').trim()&&!form.elements.files.files.length){error.textContent='Добави текст или прикачи файл.';return}
