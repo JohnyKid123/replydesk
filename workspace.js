@@ -168,7 +168,45 @@ async function suggestFromScreenshot(form) {
  }
 }
 
-function fileLabels(form){form.querySelector('.chosen').textContent=Array.from(form.elements.files.files,x=>x.name).join(', ')}
+let previewUrls=[];
+function fileLabels(form){
+ const list=form.querySelector('.chosen');
+ const input=form.elements.files;
+ const files=Array.from(input.files);
+ if(form.id!=='create'){
+  list.textContent=files.map(file=>file.name).join(', ');
+  return;
+ }
+ list.replaceChildren();
+ previewUrls.forEach(url=>URL.revokeObjectURL(url));
+ previewUrls=[];
+ files.forEach((file,index)=>{
+  const row=node('span');
+  row.style.cssText='display:flex;align-items:center;gap:.6rem;margin:.4rem 0';
+  if(file.type.startsWith('image/')){
+   const thumb=document.createElement('img');
+   thumb.src=URL.createObjectURL(file);
+   previewUrls.push(thumb.src);
+   thumb.alt='';
+   thumb.style.cssText='width:44px;height:44px;object-fit:cover;border-radius:5px';
+   row.append(thumb);
+  }
+  const label=node('span',file.name);
+  label.style.cssText='flex:1;overflow-wrap:anywhere;min-width:0';
+  const remove=node('button','Премахни','light');
+  remove.type='button';
+  remove.setAttribute('aria-label','Премахни '+file.name);
+  remove.onclick=()=>{
+   if(busy)return;
+   const remaining=new DataTransfer();
+   files.forEach((item,i)=>{if(i!==index)remaining.items.add(item)});
+   input.files=remaining.files;
+   input.dispatchEvent(new Event('change',{bubbles:true}));
+  };
+  row.append(label,remove);
+  list.append(row);
+ });
+}
 function clearUrls(){for(const url of urls)URL.revokeObjectURL(url);urls.clear()}
 async function select(id){
  if(active&&active!==id)drafts.set(active,{body:$('comment').value,files:$('reply').elements.files.files});
