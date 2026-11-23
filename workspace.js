@@ -1,4 +1,4 @@
-const sourceNames = {1: 'Mermer Foods', 2: 'Malatq Pazari'};
+const sourceNames = {1: 'YOPPY / Mermer Foods', 2: 'Malatya Pazari'};
 const $=id=>document.getElementById(id);
 const icons={mic:'<rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4m-4 0h8"/>',mail:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/>',layers:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18"/>',chat:'<path d="M4 4h16v12H9l-5 4z"/>',check:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',table:'<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M10 9v12"/>',link:'<path d="m10 14 4-4m-6 3-1 1a3 3 0 0 0 4 4l3-3m2-4 1-1a3 3 0 0 0-4-4l-3 3"/>',plus:'<path d="M12 5v14M5 12h14"/>',search:'<circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/>',refresh:'<path d="M20 10a8 8 0 1 0-1 7m1-13v6h-6"/>',clip:'<path d="m8 13 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9"/>'};
 for(const i of document.querySelectorAll('[data-icon]'))i.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true">'+icons[i.dataset.icon]+'</svg>';
@@ -13,7 +13,10 @@ history.replaceState(null,'',invite);
 const sessionKey='replydesk.profile.'+room;
 let account={};try{account=JSON.parse(localStorage.getItem(sessionKey)||'{}')}catch{}
 const savedProfileKey=name=>sessionKey+'.trusted.'+name;
-if(['Alex','Okan'].includes(account.name)&&valid(account.key))localStorage.setItem(savedProfileKey(account.name),account.key);
+const profileNames=['Alex','Okan','Mert Palaci','Mert Mehmedov'];
+for(const name of profileNames)if(name!==account.name)localStorage.removeItem(savedProfileKey(name));
+window.addEventListener('storage',e=>{if(e.key===sessionKey)location.reload()});
+if(profileNames.includes(account.name)&&valid(account.key))localStorage.setItem(savedProfileKey(account.name),account.key);
 function remembered(name){const key=localStorage.getItem(savedProfileKey(name));return valid(key)?key:null}
 let author=valid(account.key)?account.name:'',items=[],sources=[],filter='all',source=0,active='',revision=0,loadVersion=0,messageStamp='',pending=null,busy=false;
 const drafts=new Map(),urls=new Set(),ids=new WeakMap();
@@ -23,7 +26,8 @@ let registered=[],profileLoaded=false;
 async function deriveKey(name,password){
   const enc=new TextEncoder();
   const material=await crypto.subtle.importKey('raw',enc.encode(password),'PBKDF2',false,['deriveBits']);
-  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:enc.encode('Replydesk:'+room+':'+name),iterations:310000},material,256);
+  const saltRoom=name.startsWith('Mert ')?Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',enc.encode(room))),v=>v.toString(16).padStart(2,'0')).join(''):room;
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:enc.encode('Replydesk:'+saltRoom+':'+name),iterations:310000},material,256);
   return Array.from(new Uint8Array(bits),n=>n.toString(16).padStart(2,'0')).join('');
 }
 function profileHint(){
@@ -45,7 +49,7 @@ function named(fn){if(author&&valid(account.key))return fn();openProfile(fn)}
 $('rename').onclick=()=>openProfile(null);$('name').onchange=()=>{profileHint();if(profileLoaded&&remembered($('name').value))$('nameForm').requestSubmit()};
 $('nameForm').onsubmit=async e=>{
  e.preventDefault();const name=$('name').value,password=$('personalPassword').value;
- if(!profileLoaded||!['Alex','Okan'].includes(name))return;
+ if(!profileLoaded||!profileNames.includes(name))return;
  $('unlock').disabled=true;
  try{
   let key=remembered(name);
@@ -54,7 +58,11 @@ $('nameForm').onsubmit=async e=>{
   key=await deriveKey(name,password);
   }
   const data=new FormData();data.set('op','profile');data.set('name',name);data.set('profileKey',key);data.set('setup',registered.includes(name)?'0':'1');
-  await api('',data);localStorage.setItem(savedProfileKey(name),key);account={name,key};author=name;localStorage.setItem(sessionKey,JSON.stringify(account));identity();messageStamp='';$('personalPassword').value='';$('identity').close();
+  await api('',data);
+  const switched=author!==name;
+  for(const other of profileNames)if(other!==name)localStorage.removeItem(savedProfileKey(other));
+  localStorage.setItem(savedProfileKey(name),key);account={name,key};author=name;localStorage.setItem(sessionKey,JSON.stringify(account));identity();messageStamp='';$('personalPassword').value='';$('identity').close();
+  if(switched){location.reload();return}
   const fn=pending;pending=null;await refresh();fn?.();
  }catch(err){$('profileError').textContent=err.message;registered=await api('?profiles=1').catch(()=>registered)}
  finally{profileHint()}
@@ -63,12 +71,15 @@ $('share').onclick=()=>{$('invite').value=invite.href;$('copied').textContent=''
 $('copy').onclick=async()=>{try{await navigator.clipboard.writeText(invite.href);$('copied').textContent='Линкът е копиран.'}catch{$('invite').select();$('copied').textContent='Копирай избрания линк.'}};
 for(const b of document.querySelectorAll('[data-close]'))b.onclick=()=>b.closest('dialog').close();
 async function api(query='',form=null,binary=false){
+ if(!form&&query!=='?profiles=1'){
+  form=new FormData();form.set('op','read');
+ }
  if(form&&!form.has('profileKey')&&account.key)form.set('profileKey',account.key);
  const r=await fetch(host+query,{method:form?'POST':'GET',headers:{'x-room':room},body:form,cache:'no-store',credentials:'omit'});
  if(r.status===401){
   const name=form?.get('name')||account.name;
   if(remembered(name)===form?.get('profileKey'))localStorage.removeItem(savedProfileKey(name));
-  if(account.key===form?.get('profileKey')){author='';account={};localStorage.removeItem(sessionKey);identity()}
+  if(account.key&&account.key===form?.get('profileKey')){localStorage.removeItem(sessionKey);location.reload()}
  }
  if(!r.ok){const data=await r.json().catch(()=>({}));throw Error(data.error||'Грешка при връзката ('+r.status+'). Опитай отново.')}
  return binary?r.blob():r.json();
@@ -399,8 +410,21 @@ $('editForm').onsubmit=async event=>{
 };
 $('done').onclick=()=>named(async()=>{const t=items.find(i=>i.id===active);if(!t||busy)return;const f=new FormData();f.set('op','status');f.set('id',t.id);f.set('done',t.done?'0':'1');busy=true;$('done').disabled=true;
  try{await api('',f);filter=t.done?'open':'done';source=0;await refresh()}catch(e){report(e)}finally{busy=false;$('done').disabled=false}});
-identity();$('list').textContent='Зареждане…';refresh().catch(report);api('?sources=1').then(v=>{sources=v;paint()}).catch(report);
-setInterval(()=>{if(!document.hidden&&!busy&&!document.querySelector('dialog[open]'))refresh().catch(report)},12000);
+identity();
+$('logout').hidden=!author;
+$('logout').onclick=()=>{for(const n of profileNames)localStorage.removeItem(savedProfileKey(n));localStorage.removeItem(sessionKey);location.reload()};
+if(author==='Mert Mehmedov'){
+ document.querySelector('[data-source="2"]')?.remove();
+ for(const opt of document.querySelectorAll('select[name="source"] option[value="2"],#sampleSource option[value="2"]'))opt.remove();
+}
+if(author){
+ $('list').textContent='Зареждане…';
+ refresh().catch(report);api('?sources=1').then(v=>{sources=v;paint()}).catch(report);
+}else{
+ $('list').textContent='Влез с личния си профил.';
+ openProfile(null);
+}
+setInterval(()=>{if(author&&!document.hidden&&!busy&&!document.querySelector('dialog[open]'))refresh().catch(report)},12000);
 
 let deleteTarget='';
 $('deleteMail').onclick=()=>named(()=>{
