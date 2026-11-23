@@ -439,3 +439,61 @@ $('passForm').onsubmit=async e=>{
   $('newPass').value='';$('passDialog').close();$('identity').close();$('status').textContent='Паролата е сменена.';
  }catch(err){$('passError').textContent=err.message}finally{button.disabled=false}
 };
+
+const sampleStates={pending:'За изпращане',sent:'Изпратени',waiting:'Чакаме уточнение',review:'За проверка',none:'Други топли лийдове'};
+let sampleRows=[],sampleVersion=0;
+async function loadSamples(){
+ const version=++sampleVersion;
+ $('sampleStatus').textContent='Зареждане…';
+ try{
+  const rows=await api('?samples=1');
+  if(version!==sampleVersion)return;
+  sampleRows=rows;
+  $('sampleStatus').textContent='';
+  renderSamples();
+ }catch(err){if(version===sampleVersion)$('sampleStatus').textContent=err.message}
+}
+function renderSamples(){
+ const target=$('sampleGroups'),previouslyOpen=new Set(Array.from(target.querySelectorAll('details[open]'),e=>e.dataset.state));
+ const first=!target.childElementCount;
+ target.replaceChildren();
+ const term=$('sampleSearch').value.trim().toLowerCase();
+ const rows=sampleRows.filter(r=>(!$('sampleSource').value||String(r.source)===$('sampleSource').value)&&(r.company+' '+r.country).toLowerCase().includes(term));
+ for(const [state,label] of Object.entries(sampleStates)){
+  const group=node('details');
+  group.dataset.state=state;
+  group.open=!!term||(first?state==='pending'||state==='sent':previouslyOpen.has(state));
+  const matches=rows.filter(r=>r.state===state);
+  const heading=node('summary',label+' · '+matches.length);
+  heading.style.cssText='cursor:pointer;padding:.8rem 0;font-weight:700;';
+  group.append(heading);
+  for(const row of matches){
+   const card=node('div');
+   card.style.cssText='border-top:1px solid #465453;padding:.7rem 0;display:grid;gap:.4rem';
+   card.append(node('strong',row.company),node('small',[sourceNames[row.source],row.country,'Warm Leads · ред '+row.row].filter(Boolean).join(' · ')));
+   if(row.note)card.append(node('small','От таблицата: '+row.note));
+   if(row.author)card.append(node('small','Обновено от '+row.author+' · '+date(row.updated)));
+   const select=node('select');select.setAttribute('aria-label','Статус на мострите за '+row.company);
+   for(const [value,name] of Object.entries(sampleStates))select.add(new Option(name,value));
+   select.value=state;
+   select.onchange=()=>{
+    const next=select.value;select.value=state;
+    named(async()=>{
+     select.disabled=true;
+     try{
+      const form=new FormData();form.set('op','sampleState');form.set('id',row.id);form.set('state',next);form.set('previous',state);
+      await api('',form);await loadSamples();
+     }catch(err){await loadSamples();$('sampleStatus').textContent=err.message}
+     finally{select.disabled=false}
+    });
+   };
+   card.append(select);group.append(card);
+  }
+  if(!matches.length)group.append(node('p','Няма записи.'));
+  target.append(group);
+ }
+}
+$('openSamples').onclick=()=>{$('samples').showModal();loadSamples()};
+$('reloadSamples').onclick=loadSamples;
+$('sampleSource').onchange=renderSamples;
+$('sampleSearch').oninput=renderSamples;
