@@ -465,16 +465,16 @@ $('passForm').onsubmit=async e=>{
 };
 
 const sampleStates={pending:'За изпращане',sent:'Изпратени',waiting:'Чакаме уточнение',review:'За проверка',none:'Други топли лийдове'};
-let sampleRows=[],sampleVersion=0;
-async function loadSamples(){
+let sampleRows=[],sampleVersion=0,sampleStamp='';
+async function loadSamples(quiet=false){
  const version=++sampleVersion;
- $('sampleStatus').textContent='Зареждане…';
+ if(!quiet)$('sampleStatus').textContent='Зареждане…';
  try{
-  const rows=await api('?samples=1');
+  const {rows,stale}=await api('?samples=1&sync=1');
   if(version!==sampleVersion)return;
-  sampleRows=rows;
-  $('sampleStatus').textContent='';
-  renderSamples();
+  $('sampleStatus').textContent=stale.length?'Показани са последните налични данни за '+stale.map(s=>sourceNames[s]).join(', ')+'. Следва автоматичен опит.':'';
+  const stamp=JSON.stringify(rows);
+  if(stamp!==sampleStamp){sampleStamp=stamp;sampleRows=rows;renderSamples()}
  }catch(err){if(version===sampleVersion)$('sampleStatus').textContent=err.message}
 }
 function renderSamples(){
@@ -518,6 +518,10 @@ function renderSamples(){
  }
 }
 $('openSamples').onclick=()=>{$('samples').showModal();loadSamples()};
-$('reloadSamples').onclick=loadSamples;
+$('reloadSamples').onclick=()=>loadSamples();
+function syncVisibleSamples(){if(author&&!document.hidden&&$('samples').open)loadSamples(true)}
+setInterval(syncVisibleSamples,30000);
+document.addEventListener('visibilitychange',syncVisibleSamples);
+window.addEventListener('focus',syncVisibleSamples);
 $('sampleSource').onchange=renderSamples;
 $('sampleSearch').oninput=renderSamples;
